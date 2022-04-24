@@ -1,0 +1,122 @@
+######################################################################
+####             checking the varroa snakemake pipeline           ####
+#### using WGS of honey bee males (haploid) and workers (diploid) ####
+####              from Harpur et al (2019) PRJNA363032            ####
+######################################################################
+
+from scripts.split_fasta_regions import split_fasta
+from snakemake.utils import R
+import getpass
+
+localrules: getHaps, all
+
+### SET DIRECTORY PATHS FOR REFERENCE AND OUTPUT DATA
+READDir = "/bucket/EconomoU/Nurit/bee/reads"
+OUTDir = "/flash/EconomoU/Nurit/bee/data"         
+REFDir = "/flash/EconomoU/Nurit/ref2020" 
+#SCRATCH  = "/flash/EconomoU/Nurit/bee/scratch"
+
+### PATHS FOR BEE GENOME AND REGIONS SPLIT
+Ref = REFDir + "/bees/mellifera/amellifera_HAv3.fasta"
+#VDESBowtieIndex = REFDir + "/destructor/vdes_3_refseq"
+#VDESmtDNA = REFDir + "/destructor/mtDNA/NC_004454.fasta"
+
+SPLITS = range(300)
+REGIONS = split_fasta(Ref, len(SPLITS))  # dictionary with regions to be called, with keys in SPLITS
+for region in REGIONS:
+        for idx,i in enumerate(REGIONS[region]):
+                REGIONS[region][idx] = " -r " + str(i)
+
+### SAMPLES LIST AND OTHER PARAMETERS
+SAMPLES, = glob_wildcards(READDir + "/{sample}_1.fastq")
+
+Q = (20, 40) # 99 and 99.99% mapping accuracy
+CHROMOSOMES = ["NC_037638.1", "NC_037639.1", "NC_037640.1", "NC_037641.1", "NC_037642.1", "NC_037643.1", "NC_037644.1", "NC_037645.1", "NC_037646.1", "NC_037647.1", "NC_037648.1", "NC_037649.1", "NC_037650.1", "NC_037651.1", "NC_037652.1", "NC_037653.1"]
+
+#############################################################
+##### TARGET PSEUDO-RULES DEFINITION                   ######
+#############################################################
+
+rule all:
+	input: 	expand(OUTDir + "/alignments/ngm/{sample}.bam.bai", sample = SAMPLES),
+		expand(OUTDir + "/meta/{sample}.txt", sample = SAMPLES),
+		OUTDir + "/var/ngm/bee_freebayes.vcf",
+        OUTDir + "/var/ngm/freebayes_filtered"
+
+
+###############################################
+##### READS MAPPING AND QUALITY CHECK    ######
+###############################################
+#removed -T {SCRATCH}/ngm/{wildcards.sample} from shell
+rule nextgenmap:
+	input:
+		read1 = READDir + "/{sample}_1.fastq",
+		read2 = READDir + "/{sample}_2.fastq",
+	threads: 6
+	output: 
+		alignment = temp(OUTDir + "/alignments/ngm/{sample}.bam"), 
+		index = temp(OUTDir + "/alignments/ngm/{sample}.bam.bai")
+	shell:
+                """
+		echo "----ngm----" 
+        ngm -t {threads} --qry1 {input.read1} --qry2 {input.read2} --paired -r {Ref} --local --very-sensitive --rg-id {wildcards.sample} --rg-sm {wildcards.sample} --rg-pl ILLUMINA --rg-lb NEXTERA --rg-cn OIST | samtools view -Su - | samtools sort - -m 20G -o - | samtools rmdup - - | variant - -m 400 --bam -o {output.alignment}
+        echo "----finish-bam----"
+        samtools index {output.alignment}
+        echo "----finish-bam.bai----"
+		"""
+
+
+rule statsbam:
+        input:
+                alignment = OUTDir + "/alignments/ngm/{sample}.bam"
+        output:
+                temp(OUTDir + "/meta/{sample}.txt")
+        shell:
+                """
+		echo {wildcards.sample} > {output}
+		samtools depth -a {input.alignment} | awk '{{sum+=$3}} END {{ print "Mean Average Coverage on all sites = ",sum/NR}}' >> {output}
+		samtools depth -a -r NC_037638.1 -r NC_037639.1 -r NC_037640.1 -r NC_037641.1 -r NC_037642.1 -r NC_037643.1 -r NC_037644.1 -r NC_037645.1 -r NC_037646.1 -r NC_037647.1 -r NC_037648.1 -r NC_037649.1 -r NC_037650.1 -r NC_037651.1 -r NC_037652.1 -r NC_037653.1 {input.alignment} | awk '{{sum+=$3}} END {{ print "Mean Average Coverage on 7 chromosomes = ",sum/NR}}' >> {output}
+		samtools flagstat {input.alignment} >> {output}
+		"""
+
+
+#########################################
+##### VARIANT SITES CALL    		#####
+#########################################
+
+rule freebayes:
+        input:
+                expand(OUTDir + "/alignments/ngm/{sample}.bam", sample = SAMPLES)
+        output:
+                temp(OUTDir + "/var/ngm/split/freebayes.{region}.vcf")
+        params:
+                span = lambda wildcards: REGIONS[wildcards.region],
+                bams = lambda wildcards, input: os.path.dirname(input[0]) + "/*.bam",
+                filtering = "--min-mapping-quality 8 --min-base-quality 5 --use-best-n-alleles 4"
+        shell:
+                """
+		freebayes {params.filtering} --fasta-reference {Ref} {params.span} {params.bams} > {output}
+                """
+
+rule merge_vcf:
+        input:
+                expand(OUTDir + "/var/ngm/split/freebayes.{region}.vcf", region = REGIONS)
+        output:
+                temp(OUTDir + "/var/ngm/bee_freebayes.vcf")
+        shell:
+                """
+                (grep "^#" {input[0]} ; cat {input} | grep -v "^#" ) | vcfuniq  > {output}
+                """
+
+rule filter_vcf:
+        input:
+                vcf = OUTDir + "/var/ngm/bee_freebayes.vcf"
+        output:
+                temp(OUTDir + "/var/ngm/freebayes_filtered")
+        params:
+                span = "--chr NC_037638.1 --chr NC_037639.1 --chr NC_037640.1 --chr NC_037641.1 --chr NC_037642.1 --chr NC_037643.1 --chr NC_037644.1 --chr NC_037645.1 --chr NC_037646.1 --chr NC_037647.1 --chr NC_037648.1 --chr NC_037649.1 --chr NC_037650.1 --chr NC_037651.1 --chr NC_037652.1 --chr NC_037653.1",
+                filters = "--max-alleles 2 --minQ 40 --minDP 16 --maxDP 40 --max-missing 0.5 --maf 0.2"
+        shell:
+                """
+                vcftools --vcf {input.vcf} {params.span} {params.filters} --recode --recode-INFO-all --out {output}
+                """                
