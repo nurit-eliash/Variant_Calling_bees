@@ -22,39 +22,35 @@ library("grid")
 library("GGally")
 ```
 
+### Heterozygosity and inbreeding coefficient per individual
+```{r}
+
+```
 
 ### Heterozygosity and inbreeding coefficient per individual
 ```{r}
-ind_het <- read_delim("/Users/nuriteliash/Documents/GitHub/Snakemake_bees/data/vcf_stats/Q40BIALLDP16_40mis.5maf0.2Chr7.het", delim = "\t",
+ind_het <- read_delim("/Users/nuriteliash/Documents/GitHub/VariantCall_bees/data/vcf_stats/bee.het", delim = "\t",
            col_names = c("ind","homo_ob", "homo_ex", "nsites", "f"), skip = 1)
 
-#indv = substr(ind_het$ind,1,nchar(ind_het$ind)-3)
-#ind_het <- ind_het %>%
-#  mutate(ind=indv)
-#ind_het <-sub("_S$", "", ind_het$ind) 
-
-# find all 'female' and 'male' 
-#male <- grep("son",ind_het$ind)
-#female <- grep("dat|fn|sis",ind_het$ind)
-
-ind_het_sex <- ind_het %>%
-  mutate(sex = ifelse(row_number() %in% female, "female", ifelse(row_number() %in% male, "male", "not-determined"))) %>%
+# add the sex of each sample, and the proportion of homosyzgotic and hetero sites
+sex <- read.csv("/Users/nuriteliash/Documents/GitHub/VariantCall_bees/data/meta.csv")
+ind_het <- left_join(ind_het,sex, by ="ind") %>%
   mutate(hom_prop =  homo_ob/nsites) %>%
   mutate(het_prop = (nsites-homo_ob)/nsites)
  
 #plot inbreeding coefficient per individual
-ggplot(ind_het_sex, aes(f, fill = sex)) + geom_histogram(color = "black") + 
+ggplot(ind_het, aes(f, fill = sex)) + geom_histogram(color = "black") + 
   theme_light() +
   ggtitle("Inbreeding coefficient per individual")
 
 # plot heterozygosity proportion, in each sex
-ggplot(ind_het_sex) +
+ggplot(ind_het) +
     geom_boxplot(aes(x = sex, y = het_prop, fill = sex)) + scale_y_continuous() + 
     theme_classic() +
-    ggtitle("Proportion of heterzygotic sites")
+    ggtitle("Proportion of heterzygotic sites in bees")
 
 # is there a significant difference in the proportion of heterozygotic sites between males and females?5
-test <- ind_het_sex %>%
+test <- ind_het %>%
   filter(sex == c("female", "male"))
 
 wilcox.test(het_prop ~ sex, alternative = "two.sided", data = test)
@@ -66,30 +62,12 @@ t.test(asin(sqrt(het_prop)) ~ sex, alternative = "two.sided", data = test)
 plot heterozygosity 
 ```{r}
 # plot heterozygosity proportion, in each individual, color code by sex
-ggplot(ind_het_sex, aes(x=ind, y=het_prop, color=sex)) + 
+ggplot(ind_het, aes(x=ind, y=het_prop, color=sex)) + 
     geom_point(size=3) +
     theme_classic() +
-    ggtitle("Proportion of heterzygotic sites per individual") +
+    ggtitle("Proportion of heterzygotic sites per bee") +
     xlab("Sample") + 
     ylab("Proportion of het zites")
-
-# shape code by family (for 6 families)
-fam = substr(ind_het_sex$ind, 1,3)
-ind_het_fam <- ind_het_sex %>%
-  mutate(family = fam) %>%
-  filter((family %in% c("63_","600","42_","596","412","133")))
-
-ind_het_fam <- ind_het_sex %>%
-  mutate(family = fam) %>%
-  filter((family %in% c("43_","177","240","110","596")))
-
-ggplot(ind_het_fam, aes(x=ind, y=het_prop, color=sex, shape=family)) + 
-    geom_point(size=6) +
-    theme_classic() +
-    ggtitle("Proportion of heterzygotic sites per individual") +
-    xlab("Sample") + 
-    ylab("Proportion of het zites") +
-    theme(axis.text.x = element_text(angle = 90))
 ```
 
 ### Heterozygosity per site
