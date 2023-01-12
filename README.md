@@ -1,4 +1,4 @@
-# Variant_Call_bees
+# Variant_Calling_bees
 check the snakemake workflow of varroa, is the heterozygotic sites are bioinformatic artifact?
 
 ## Aim:
